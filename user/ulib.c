@@ -134,3 +134,25 @@ memcpy(void *dst, const void *src, uint n)
 {
   return memmove(dst, src, n);
 }
+
+// functions added by us
+
+char* my_strcat(char* destination, const char* source)
+{
+    int i, j;
+ 
+    // move to the end of destination string
+    for (i = 0; destination[i] != '\0'; i++);
+ 
+    // i now points to terminating null character in destination
+ 
+    // Appends characters of source to the destination string
+    for (j = 0; source[j] != '\0'; j++)
+        destination[i + j] = source[j];
+ 
+    // null terminate destination string
+    destination[i + j] = '\0';
+ 
+    // destination is returned by standard strcat()
+    return destination;
+}

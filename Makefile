@@ -73,6 +73,17 @@ endif
 
 LDFLAGS = -z max-page-size=4096
 
+ifeq ($(SCHEDFLAG), FCFS)
+	CFLAGS += -D FCFS
+else ifeq ($(SCHEDFLAG), SRT)
+	CFLAGS += -D SRT
+else ifeq ($(SCHEDFLAG), CFSD)
+	CFLAGS += -D CFSD
+else
+	CFLAGS += -D DEFAULT
+endif
+
+
 $K/kernel: $(OBJS) $K/kernel.ld $U/initcode
 	$(LD) $(LDFLAGS) -T $K/kernel.ld -o $K/kernel $(OBJS) 
 	$(OBJDUMP) -S $K/kernel > $K/kernel.asm
@@ -132,9 +143,11 @@ UPROGS=\
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\
+	$U/_tracetest\
+	$U/_test3\
 
-fs.img: mkfs/mkfs README $(UPROGS)
-	mkfs/mkfs fs.img README $(UPROGS)
+fs.img: mkfs/mkfs path README $(UPROGS)
+	mkfs/mkfs fs.img path README $(UPROGS)
 
 -include kernel/*.d user/*.d
 
@@ -153,7 +166,7 @@ QEMUGDB = $(shell if $(QEMU) -help | grep -q '^-gdb'; \
 	then echo "-gdb tcp::$(GDBPORT)"; \
 	else echo "-s -p $(GDBPORT)"; fi)
 ifndef CPUS
-CPUS := 3
+CPUS := 1
 endif
 
 QEMUOPTS = -machine virt -bios none -kernel $K/kernel -m 128M -smp $(CPUS) -nographic

@@ -20,6 +20,9 @@ static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
 
+uint64 queue_counter =1;
+struct spinlock queue_lock; // task 4
+
 // helps ensure that wakeups of wait()ing
 // parents are not lost. helps obey the
 // memory model when using p->parent.
@@ -50,6 +53,7 @@ procinit(void)
   
   initlock(&pid_lock, "nextpid");
   initlock(&wait_lock, "wait_lock");
+  initlock(&queue_lock, "queue_counter"); // task 4
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
       p->kstack = KSTACK((int) (p - proc));
@@ -119,6 +123,12 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  p->ctime = ticks; 
+  p->stime =0;      
+  p->retime =0;     
+  p->rutime=0;      
+  p->ttime = 0;     
+  p->average_bursttime = QUANTUM*100;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -164,6 +174,7 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->maskid = 0; //modified
 }
 
 // Create a user page table for a given process,
@@ -243,7 +254,11 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
-
+  printf("here?\n");
+  acquire(&queue_lock);
+  p->queue_location = queue_counter;
+  queue_counter++;
+  release(&queue_lock);
   release(&p->lock);
 }
 
@@ -266,6 +281,7 @@ growproc(int n)
   p->sz = sz;
   return 0;
 }
+
 
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
@@ -291,7 +307,8 @@ fork(void)
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
-
+  (np-> maskid) =  (p->maskid); // modified
+  
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
 
@@ -313,6 +330,10 @@ fork(void)
 
   acquire(&np->lock);
   np->state = RUNNABLE;
+  acquire(&queue_lock);
+  np->queue_location = queue_counter;
+  queue_counter++;
+  release(&queue_lock);
   release(&np->lock);
 
   return pid;
@@ -370,6 +391,7 @@ exit(int status)
 
   p->xstate = status;
   p->state = ZOMBIE;
+  p->ttime = ticks;
 
   release(&wait_lock);
 
@@ -439,30 +461,63 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  
+  int min_search_index = 1;
   c->proc = 0;
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
 
-    for(p = proc; p < &proc[NPROC]; p++) {
-      acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
+    #ifdef DEFAULT
+      for(p = proc; p < &proc[NPROC]; p++) {
+        acquire(&p->lock);
+        if(p->state == RUNNABLE) {
+          // Switch to chosen process.  It is the process's job
+          // to release its lock and then reacquire it
+          // before jumping back to us.
+          p->state = RUNNING;
+          c->proc = p;
+          swtch(&c->context, &p->context);
+          // Process is done running for now.
+          // It should have changed its p->state before coming back.
+          c->proc = 0;
+        }
+        release(&p->lock);
       }
-      release(&p->lock);
-    }
+    #endif
+  
+    #ifdef FCFS
+      //int next_proc_for_exec = UINT64_MAX;
+      struct proc *proc_for_exec = 0;
+      for(p = proc; p < &proc[NPROC]; p++) {
+        acquire(&queue_lock);
+        if (p->state != RUNNABLE)
+        continue; 
+
+        if (p->proc == 0 || (((p->queue_location) >= min_search_index) && ((p->queue_location) < proc_for_exec->queue_location))){
+          proc_for_exec = p;
+        }
+        release(&queue_lock);
+      }
+      if (proc_for_exec != 0){
+        acquire(&proc_for_exec->lock);
+        if(proc_for_exec->state == RUNNABLE) {
+          // Switch to chosen process.  It is the process's job
+          // to release its lock and then reacquire it
+          // before jumping back to us.
+          proc_for_exec->state = RUNNING;
+          c->proc = proc_for_exec;
+          swtch(&c->context, &proc_for_exec->context);
+
+          // Process is done running for now.
+          // It should have changed its p->state before coming back.
+          c->proc = 0;
+        }
+        release(&proc_for_exec->lock);
+      } 
+    #endif
   }
 }
+
 
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores
@@ -498,6 +553,10 @@ yield(void)
   struct proc *p = myproc();
   acquire(&p->lock);
   p->state = RUNNABLE;
+  acquire(&queue_lock);
+  p->queue_location = queue_counter;
+  queue_counter++;
+  release(&queue_lock);
   sched();
   release(&p->lock);
 }
@@ -566,6 +625,10 @@ wakeup(void *chan)
       acquire(&p->lock);
       if(p->state == SLEEPING && p->chan == chan) {
         p->state = RUNNABLE;
+        acquire(&queue_lock);
+        p->queue_location = queue_counter;
+        queue_counter++;
+        release(&queue_lock);
       }
       release(&p->lock);
     }
@@ -587,6 +650,10 @@ kill(int pid)
       if(p->state == SLEEPING){
         // Wake process from sleep().
         p->state = RUNNABLE;
+        acquire(&queue_lock);
+        p->queue_location = queue_counter;
+        queue_counter++;
+        release(&queue_lock);
       }
       release(&p->lock);
       return 0;
@@ -652,5 +719,113 @@ procdump(void)
       state = "???";
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
+  }
+}
+
+//modified
+int 
+trace (int mask, int pid)
+{
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+    if(p->pid == pid){
+      p->maskid = mask;
+      release(&p->lock);
+      return 0;
+    }
+    release(&p->lock);
+  }
+  return -1;
+}
+
+int 
+wait_stat(int* status, struct perf * performance)
+{
+  struct proc *np;
+  int havekids, pid;
+  struct proc *p = myproc();
+
+  acquire(&wait_lock);
+
+  for(;;){
+    // Scan through table looking for exited children.
+    havekids = 0;
+    
+    for(np = proc; np < &proc[NPROC]; np++){
+      
+      if(np->parent == p){
+        
+        // make sure the child isn't still in exit() or swtch().
+        acquire(&np->lock);
+
+        havekids = 1;
+        if(np->state == ZOMBIE){
+          printf("\nIts got to proc.c line 1");
+          // Found one.
+          pid = np->pid;
+          if (copyout(p->pagetable, ((uint64)&(performance->ctime)) , (char *)&np->ctime, 24) < 0){
+            printf("\nIts got to proc.c line 2");
+            release(&np->lock);
+            release(&wait_lock);
+            return -1;
+          }
+          else if (copyout(p->pagetable, ((uint64)&(performance->ttime)) , (char *)&np->ttime, 24) < 0){
+            printf("\nIts got to proc.c line 3");
+            release(&np->lock);
+            release(&wait_lock);
+            return -1;
+          }       
+          else if (copyout(p->pagetable, ((uint64)&(performance->stime)) , (char *)&np->stime, 24) < 0){
+            printf("\nIts got to proc.c line 4");
+            release(&np->lock);
+            release(&wait_lock);
+            return -1;
+          }          
+          else if (copyout(p->pagetable, ((uint64)&(performance->retime)) , (char *)&np->retime, 24) < 0){
+            printf("\nIts got to proc.c line 5");
+            release(&np->lock);
+            release(&wait_lock);
+            return -1;
+
+          }
+          else if (copyout(p->pagetable, ((uint64)&(performance->rutime)) , (char *)&np->rutime, 24) < 0){
+            printf("\nIts got to proc.c line 6");
+            release(&np->lock);
+            release(&wait_lock);
+            return -1;
+
+          }
+          else if (copyout(p->pagetable, ((uint64)&(performance->average_bursttime)) , (char *)&np->average_bursttime, 24) < 0){
+            printf("\nIts got to proc.c line 7");
+            release(&np->lock);
+            release(&wait_lock);
+            return -1;
+          }
+          else if(((uint64)status) != 0 && copyout(p->pagetable, ((uint64)status) , (char *)&np->xstate,
+                                  sizeof(np->xstate)) < 0) {
+            printf("\nIts got to proc.c line 8");
+            release(&np->lock);
+            release(&wait_lock);
+            return -1;
+          }
+          
+          freeproc(np);
+          release(&np->lock);
+          release(&wait_lock);
+          return pid;
+        }
+        release(&np->lock);
+      }
+    }
+
+    // No point waiting if we don't have any children.
+    if(!havekids || p->killed){
+      release(&wait_lock);
+      return -1;
+    }
+    
+    // Wait for a child to exit.
+    sleep(p, &wait_lock);  //DOC: wait-sleep
   }
 }

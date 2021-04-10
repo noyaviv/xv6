@@ -1,5 +1,6 @@
 struct stat;
 struct rtcdate;
+struct perf;
 
 // system calls
 int fork(void);
@@ -23,6 +24,8 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int trace(int,int);
+int wait_stat(int*, struct perf*); 
 
 // ulib.c
 int stat(const char*, struct stat*);
@@ -40,3 +43,4 @@ void free(void*);
 int atoi(const char*);
 int memcmp(const void *, const void *, uint);
 void *memcpy(void *, const void *, uint);
+char* my_strcat(char* destination, const char* source);

@@ -3,6 +3,7 @@
 #include "kernel/types.h"
 #include "user/user.h"
 #include "kernel/fcntl.h"
+// #include "user/ulib.c"
 
 // Parsed command representation
 #define EXEC  1
@@ -52,11 +53,31 @@ struct backcmd {
 int fork1(void);  // Fork but panics on failure.
 void panic(char*);
 struct cmd *parsecmd(char*);
+char* reading_from_fd(int); //NOY&HADAS
+
+
+char* reading_from_fd(int fd){
+  char* path=malloc(100);
+  memset(path,0,100);
+  char buffer[] = {0,0};
+  int read_byte_into_buffer=read(fd,buffer,1);
+  while (read_byte_into_buffer>0){
+    if (strlen(path)>=100){ //extand path array
+      char* new_path=malloc(strlen(path)+read_byte_into_buffer+1);
+      memset(new_path,0,100);
+      strcpy(new_path,path);
+      free(path);
+      path=new_path; ///let path point to new_path
+    }
+    my_strcat(path,buffer);
+    read_byte_into_buffer=read(fd,buffer,1);
+  }
+
+  return path;
+}
 
 // Execute cmd.  Never returns.
-void
-runcmd(struct cmd *cmd)
-{
+void runcmd(struct cmd *cmd){
   int p[2];
   struct backcmd *bcmd;
   struct execcmd *ecmd;
@@ -71,11 +92,44 @@ runcmd(struct cmd *cmd)
   default:
     panic("runcmd");
 
+
   case EXEC:
-    ecmd = (struct execcmd*)cmd;
-    if(ecmd->argv[0] == 0)
+    // int not_found = 0; //':' not found
+    ecmd = (struct execcmd*)cmd; //execcmd
+
+    if(ecmd->argv[0] == 0) //no arguments in cmd line
       exit(1);
-    exec(ecmd->argv[0], ecmd->argv);
+
+    int fd = open("/path",O_RDONLY);
+
+    if(fd == -1){
+      fprintf(2, "open %s failed\n", ecmd->argv[0]);
+      exit(1);
+      }
+
+    // // file available
+    // int rd = read(fd, path, sizeof(path));
+    // close(fd);
+
+    // if (rd<0)
+    //   exit(1);
+
+  //read succssesfuly fd into path
+    char *path=reading_from_fd(fd);
+    while(*path!=0 && *path!='\n'){
+        char *word=malloc(100);
+        memset(word,0,100);
+        while(*path!=':'){
+          char const_buf[]={0,0};
+          const_buf[0]=*path;
+          my_strcat(word, const_buf);
+          path++; 
+        }
+        char *new_path = my_strcat(word,ecmd->argv[0]);
+        exec(new_path, ecmd->argv); 
+    }
+    exec(ecmd->argv[0], ecmd->argv); 
+    // int int_fd = open("/path", O_RDONLY);
     fprintf(2, "exec %s failed\n", ecmd->argv[0]);
     break;
 
@@ -154,7 +208,6 @@ main(void)
       break;
     }
   }
-
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf)) >= 0){
     if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){

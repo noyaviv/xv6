@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 
+//struct proc proc[NPROC];
 struct spinlock tickslock;
 uint ticks;
 
@@ -162,8 +163,23 @@ kerneltrap()
 void
 clockintr()
 {
+  struct proc *p;
   acquire(&tickslock);
   ticks++;
+  
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+    if (p->state == RUNNING){
+      p->rutime ++;
+    }
+    else if (p->state == RUNNABLE){
+      p->retime ++;
+    }
+    else if (p->state == SLEEPING){
+      p->stime ++;
+    }
+    release(&p->lock);
+  }
   wakeup(&ticks);
   release(&tickslock);
 }

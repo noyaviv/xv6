@@ -95,3 +95,34 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+// modified
+uint64
+sys_trace(void)
+{
+  int maskid, pid;
+  if (argint(0, &maskid) < 0)
+    return -1;
+  if (argint(1, &pid) < 0)
+    return -1;
+  trace(maskid,pid);
+  return 0;
+}
+
+// modified
+uint64
+sys_wait_stat(void)
+{
+  int* status;
+  struct perf* performance;
+
+  if(argint(0, (void*)&status) < 0){
+    printf("\nIts got to sysproc.c line 3");
+    return -1;
+  }
+  if(argaddr(1, (void*)&performance) < 0){
+    printf("\nIts got to sysproc.c line 4");
+    return -1;
+  }
+  return wait_stat(status,performance);
+}

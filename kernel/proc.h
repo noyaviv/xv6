@@ -28,6 +28,7 @@ struct cpu {
 
 extern struct cpu cpus[NCPU];
 
+
 // per-process data for the trap handling code in trampoline.S.
 // sits in a page by itself just under the trampoline page in the
 // user page table. not specially mapped in the kernel page table.
@@ -92,6 +93,14 @@ struct proc {
   int killed;                  // If non-zero, have been killed
   int xstate;                  // Exit status to be returned to parent's wait
   int pid;                     // Process ID
+  int maskid;                  // Mask for the trace mode system call
+  int ctime;                   // process creation time
+  int ttime;                   // process termination time
+  int stime;                   // task 3: the totel time the process spent in the SLEEPING state
+  int retime;                  // task 3: the totel time the process spent in the RUNNABLE state
+  int rutime;                  // task 3: the totel time the process spent in the RUNNING state
+  int average_bursttime;       // task 3: average of bursstimes in 100ths (so average*100)
+  uint64 queue_location;       // task 4: queue position                      
 
   // proc_tree_lock must be held when using this:
   struct proc *parent;         // Parent process
@@ -105,4 +114,15 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+};
+
+extern struct proc proc[NPROC];
+
+struct perf {
+    int ctime;        //process creation time
+    int ttime;        //process termination time
+    int stime;        //the totel time the process spent in the SLEEPING state
+    int retime;       //the totel time the process spent in the RUNNABLE state
+    int rutime;       //the totel time the process spent in the RUNNING state
+    int average_bursttime;  //average of bursstimes in 100ths (so average*100)
 };
